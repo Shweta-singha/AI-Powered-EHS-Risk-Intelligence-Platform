@@ -1,0 +1,31 @@
+SIC_LOOKUP = {
+    1521: "General Contractors - Single-Family Houses",
+    1522: "General Contractors - Residential (Other than Single-Family)",
+    1531: "Operative Builders",
+    1541: "General Contractors - Industrial Buildings & Warehouses",
+    1542: "General Contractors - Nonresidential Buildings, Other",
+    1611: "Highway and Street Construction",
+    1622: "Bridge, Tunnel, and Elevated Highway Construction",
+    1623: "Water, Sewer, and Utility Lines",
+    1629: "Heavy Construction, Not Elsewhere Classified",
+    1711: "Plumbing, Heating, and Air Conditioning",
+    1721: "Painting and Paper Hanging",
+    1731: "Electrical Work",
+    1741: "Masonry, Stone Setting, and Other Stone Work",
+    1742: "Plastering, Drywall, Acoustical, and Insulation Work",
+    1743: "Terrazzo, Tile, Marble, and Mosaic Work",
+    1751: "Carpentry Work",
+    1752: "Floor Laying and Other Floor Work",
+    1761: "Roofing, Siding, and Sheet Metal Work",
+    1771: "Concrete Work",
+    1781: "Water Well Drilling",
+    1791: "Structural Steel Erection",
+    1793: "Glass and Glazing Work",
+    1794: "Excavation Work",
+    1795: "Wrecking and Demolition Work",
+    1796: "Installation of Building Equipment, NEC",
+    1799: "Special Trade Contractors, Not Elsewhere Classified",
+}
+
+def sic_to_name(code: int) -> str:
+    return SIC_LOOKUP.get(int(code), f"Unknown SIC ({code})")
