@@ -8,6 +8,12 @@ from sic_codes import sic_to_name
 RAW_PATH = "data/raw/OSHA_Acc-master/osha 4470 (with additional metadata scraped from narrative site).xlsx"
 OUT_PATH = "data/processed/osha_clean.csv"
 
+# EDA (notebooks/01_eda.ipynb, Section 6) found a max fall distance of 2,000 ft,
+# which is not physically plausible on a construction site (a fatal fall from a
+# residential roof is typically well under 100 ft). Cap and null out anything
+# above this so a scraping/data-entry error doesn't skew fall-risk analysis.
+MAX_PLAUSIBLE_FALL_FT = 100
+
 MONTH_DATE_RE = re.compile(
     r"(January|February|March|April|May|June|July|August|September|October|"
     r"November|December)\s+(\d{1,2})\s*,?\s*(\d{4})"
@@ -70,6 +76,10 @@ def main():
 
     df["is_fall_incident"] = df["fall dist"] > 0
     df["fall_distance_ft"] = df["fall dist"].where(df["fall dist"] > 0)
+
+    outlier_falls = (df["fall_distance_ft"] > MAX_PLAUSIBLE_FALL_FT).sum()
+    df.loc[df["fall_distance_ft"] > MAX_PLAUSIBLE_FALL_FT, "fall_distance_ft"] = pd.NA
+    print(f"Nulled {outlier_falls} fall_distance_ft values above {MAX_PLAUSIBLE_FALL_FT} ft (likely data errors)")
 
     df["fatcause_clean"] = df["fatcause"].apply(clean_fatcause)
     df["is_fatality"] = df["fatcause_clean"].notna()
