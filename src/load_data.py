@@ -43,6 +43,12 @@ def clean_fatcause(val):
     v = val.strip()
     return None if v in ("[]", "", "nan") else v
 
+def clean_cause(val):
+    if not isinstance(val, str):
+        return None
+    v = val.strip()
+    return None if v in ("[]", "", "nan") else v
+
 def main():
     df = pd.read_excel(RAW_PATH)
     print(f"Loaded {len(df)} rows")
@@ -68,13 +74,15 @@ def main():
     df["fatcause_clean"] = df["fatcause"].apply(clean_fatcause)
     df["is_fatality"] = df["fatcause_clean"].notna()
 
+    df["cause_clean"] = df["cause"].apply(clean_cause)
+
     df["narrative_length"] = df["SUMMARY"].astype(str).str.len()
 
     keep_cols = [
         "id", "title", "SUMMARY", "narrative_length",
         "industry", "industry_name",
         "occupation_clean", "1st occupation",
-        "diagnosis_clean", "cause", "fatcause_clean", "is_fatality",
+        "diagnosis_clean", "cause", "cause_clean", "fatcause_clean", "is_fatality",
         "is_fall_incident", "fall_distance_ft",
         "incident_date", "year", "month", "month_name",
     ]
