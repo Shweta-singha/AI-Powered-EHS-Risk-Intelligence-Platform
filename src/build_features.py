@@ -13,13 +13,15 @@ def top_n_or_other(series: pd.Series, n: int) -> pd.Series:
     return series.where(series.isin(top), "Other")
 
 
-def main():
-    df = pd.read_csv(IN_PATH)
+def load_and_filter(path=IN_PATH):
+    df = pd.read_csv(path)
 
     # occupation_primary is missing for only 7/4470 rows (0.16%) -- small enough to drop
     # rather than invent an "Unknown" category for it.
-    df = df.dropna(subset=["occupation_primary"])
+    return df.dropna(subset=["occupation_primary"]).reset_index(drop=True)
 
+
+def build_feature_frame(df):
     occupation_grouped = top_n_or_other(df["occupation_primary"], TOP_OCCUPATIONS)
     industry_grouped = top_n_or_other(df["industry_name"], TOP_INDUSTRIES)
 
@@ -55,6 +57,13 @@ def main():
         ],
         axis=1,
     )
+
+    return features
+
+
+def main():
+    df = load_and_filter()
+    features = build_feature_frame(df)
 
     features.to_csv(OUT_PATH, index=False)
 
