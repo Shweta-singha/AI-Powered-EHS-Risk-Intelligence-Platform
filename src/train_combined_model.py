@@ -2,7 +2,7 @@ import sys
 
 import numpy as np
 from scipy.sparse import csr_matrix, hstack
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from sklearn.model_selection import train_test_split
@@ -12,6 +12,37 @@ from build_features import build_feature_frame, load_and_filter
 
 TEST_SIZE = 0.2
 RANDOM_STATE = 42  # same as train_model.py / train_text_model.py, for consistent splits
+
+# Same calendar-year/month stop-word exclusion as train_text_model.py -- see the
+# comment there for why (scrape-selection confound, not risk signal).
+MONTH_NAMES = {
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+}
+YEAR_TOKENS = {str(y) for y in range(1900, 2031)}
+CUSTOM_STOP_WORDS = list(ENGLISH_STOP_WORDS | MONTH_NAMES | YEAR_TOKENS)
+
+
+def build_custom_analyzer():
+    """Same artifact-dropping analyzer as train_text_model.py -- see the
+    comment there for why (ID-numbering artifacts, not risk signal)."""
+    base_vectorizer = TfidfVectorizer(stop_words=CUSTOM_STOP_WORDS, ngram_range=(1, 2))
+    base_analyzer = base_vectorizer.build_analyzer()
+
+    def analyzer(doc):
+        tokens = []
+        for token in base_analyzer(doc):
+            words = token.split(" ")
+            if len(words) == 2:
+                a, b = words
+                if a == b:
+                    continue
+                if any(w.isdigit() and int(w) < 100 for w in words):
+                    continue
+            tokens.append(token)
+        return tokens
+
+    return analyzer
 
 # Reference numbers from earlier steps, for direct comparison.
 DAY4_RF_METRICS = {
@@ -92,6 +123,24 @@ def print_comparison(combined_metrics):
     )
 
 
+def print_top_text_features(vectorizer, log_reg, n=20):
+    """Top TF-IDF coefficients within the combined model (text slice only --
+    the structured-feature coefficients aren't comparable on the same scale
+    since those inputs aren't TF-IDF-normalized)."""
+    feature_names = vectorizer.get_feature_names_out()
+    n_text = len(feature_names)
+    coefs = log_reg.coef_[0][:n_text]
+    order = np.argsort(coefs)
+
+    print(f"\n--- Top {n} TF-IDF features (within combined model) pushing toward FATAL ---")
+    for idx in order[::-1][:n]:
+        print(f"{feature_names[idx]:<25} {coefs[idx]:+.4f}")
+
+    print(f"\n--- Top {n} TF-IDF features (within combined model) pushing toward NON-FATAL ---")
+    for idx in order[:n]:
+        print(f"{feature_names[idx]:<25} {coefs[idx]:+.4f}")
+
+
 def main():
     # Structured features and narrative text are both derived from the same
     # filtered dataframe (same row order, same index), so they can be
@@ -115,7 +164,7 @@ def main():
     y_test = y.iloc[idx_test]
 
     vectorizer = TfidfVectorizer(
-        ngram_range=(1, 2), max_features=2000, stop_words="english", min_df=5
+        analyzer=build_custom_analyzer(), max_features=2000, min_df=5
     )
     X_text_train = vectorizer.fit_transform(narrative_train)
     X_text_test = vectorizer.transform(narrative_test)
@@ -137,6 +186,8 @@ def main():
     combined_metrics = evaluate("Combined text + structured Logistic Regression", y_test, y_pred, y_score)
 
     print_comparison(combined_metrics)
+
+    print_top_text_features(vectorizer, log_reg, n=20)
 
 
 if __name__ == "__main__":
