@@ -1,5 +1,6 @@
 import os
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from sklearn.model_selection import train_test_split
 
 IN_PATH = "data/processed/features.csv"
 SHAP_PLOT_PATH = "docs/shap_summary.png"
+MODEL_PATH = "models/day4_risk_rf.joblib"
 
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
@@ -48,6 +50,14 @@ def main():
     rand_forest = RandomForestClassifier(class_weight="balanced", random_state=RANDOM_STATE)
     rand_forest.fit(X_train, y_train)
     print("Fit RandomForestClassifier (class_weight='balanced')")
+
+    # Random Forest is the model chosen below (better balanced recall, see the
+    # SHAP comment) -- it's the one downstream tools/agents should load, so it's
+    # saved along with the exact training column order (one-hot dummy columns
+    # depend on which occupations/industries were in the training data's top-N).
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    joblib.dump({"model": rand_forest, "feature_columns": X_train.columns.tolist()}, MODEL_PATH)
+    print(f"Saved Random Forest model -> {MODEL_PATH}")
 
     log_reg_pred = log_reg.predict(X_test)
     log_reg_score = log_reg.predict_proba(X_test)[:, 1]

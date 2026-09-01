@@ -37,33 +37,67 @@ TEST_QUERIES = [
 ]
 
 
+_model = None
+_collection = None
+
+
+def _get_model_and_collection():
+    """Lazily loads and caches the embedding model and Chroma collection so
+    repeated calls to search() (e.g. from an agent tool) don't reload either
+    on every query."""
+    global _model, _collection
+    if _model is None:
+        _model = SentenceTransformer(EMBEDDING_MODEL)
+    if _collection is None:
+        client = chromadb.PersistentClient(path=DB_DIR)
+        _collection = client.get_collection(COLLECTION_NAME)
+    return _model, _collection
+
+
+def search(query: str, top_k: int = TOP_K) -> list[dict]:
+    """Runs a query against the compliance-docs collection and returns the
+    top_k chunks, overfetching and re-ranking with the boilerplate penalty
+    (see BOILERPLATE_PENALTY above) so generic legal-preamble/footer chunks
+    don't out-rank genuine topic-specific content."""
+    model, collection = _get_model_and_collection()
+
+    query_embedding = model.encode([query], convert_to_numpy=True)
+    results = collection.query(query_embeddings=query_embedding.tolist(), n_results=OVERFETCH_N)
+
+    candidates = []
+    for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
+        similarity = 1 - dist  # cosine distance -> cosine similarity
+        is_boilerplate = meta.get("is_boilerplate", False)
+        adjusted = similarity - BOILERPLATE_PENALTY if is_boilerplate else similarity
+        candidates.append((adjusted, similarity, doc, meta, is_boilerplate))
+
+    candidates.sort(key=lambda c: c[0], reverse=True)
+
+    return [
+        {
+            "source": meta["source"],
+            "chunk_index": meta["chunk_index"],
+            "similarity": similarity,
+            "is_boilerplate": is_boilerplate,
+            "text": doc,
+        }
+        for _, similarity, doc, meta, is_boilerplate in candidates[:top_k]
+    ]
+
+
 def main():
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    client = chromadb.PersistentClient(path=DB_DIR)
-    collection = client.get_collection(COLLECTION_NAME)
+    _, collection = _get_model_and_collection()
     print(f"Loaded collection '{COLLECTION_NAME}' ({collection.count()} chunks)\n")
 
     for query in TEST_QUERIES:
         print(f"{'=' * 80}\nQuery: {query}\n{'=' * 80}")
 
-        query_embedding = model.encode([query], convert_to_numpy=True)
-        results = collection.query(query_embeddings=query_embedding.tolist(), n_results=OVERFETCH_N)
-
-        candidates = []
-        for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
-            similarity = 1 - dist  # cosine distance -> cosine similarity
-            is_boilerplate = meta.get("is_boilerplate", False)
-            adjusted = similarity - BOILERPLATE_PENALTY if is_boilerplate else similarity
-            candidates.append((adjusted, similarity, doc, meta, is_boilerplate))
-
-        candidates.sort(key=lambda c: c[0], reverse=True)
-
-        for rank, (adjusted, similarity, doc, meta, is_boilerplate) in enumerate(candidates[:TOP_K], start=1):
-            snippet = doc[:400] + ("..." if len(doc) > 400 else "")
-            flag = " [boilerplate, deprioritized]" if is_boilerplate else ""
+        for rank, result in enumerate(search(query), start=1):
+            snippet = result["text"][:400] + ("..." if len(result["text"]) > 400 else "")
+            flag = " [boilerplate, deprioritized]" if result["is_boilerplate"] else ""
             print(
-                f"\n--- Rank {rank} | source: {meta['source']} "
-                f"(chunk {meta['chunk_index']}) | similarity: {similarity:.4f}{flag} ---"
+                f"\n--- Rank {rank} | source: {result['source']} "
+                f"(chunk {result['chunk_index']}) | similarity: {result['similarity']:.4f}{flag} ---"
             )
             print(snippet)
         print()

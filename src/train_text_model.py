@@ -1,51 +1,20 @@
+import os
+
+import joblib
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 from sklearn.model_selection import train_test_split
 
+from text_analyzer import build_custom_analyzer
+
 IN_PATH = "data/processed/osha_clean.csv"
+MODEL_PATH = "models/day5_text_logreg.joblib"
 
 TEST_SIZE = 0.2
 RANDOM_STATE = 42  # same as train_model.py, for a consistent train/test split
-
-# Coefficient inspection (see docs/model_card.md) found calendar-year and month
-# tokens dominating the top TF-IDF coefficients -- a scrape-selection/dataset-
-# construction confound (which years' narratives got scraped correlates with
-# label), not real risk signal. Excluded as stop words so bigrams built on top
-# of them (e.g. "2007 employee") are also suppressed at the tokenization stage.
-MONTH_NAMES = {
-    "january", "february", "march", "april", "may", "june", "july", "august",
-    "september", "october", "november", "december",
-}
-YEAR_TOKENS = {str(y) for y in range(1900, 2031)}
-CUSTOM_STOP_WORDS = list(ENGLISH_STOP_WORDS | MONTH_NAMES | YEAR_TOKENS)
-
-
-def build_custom_analyzer():
-    """TF-IDF analyzer that also drops artifact bigrams: two identical words
-    (e.g. "employee employee", produced when stopword removal collapses
-    "Employee #1 and Employee #2" into adjacent duplicate tokens) and bigrams
-    where one token is a bare number under 100 (e.g. "20 employee", from
-    "Employee #20") -- both are ID-numbering artifacts, not risk signal."""
-    base_vectorizer = TfidfVectorizer(stop_words=CUSTOM_STOP_WORDS, ngram_range=(1, 2))
-    base_analyzer = base_vectorizer.build_analyzer()
-
-    def analyzer(doc):
-        tokens = []
-        for token in base_analyzer(doc):
-            words = token.split(" ")
-            if len(words) == 2:
-                a, b = words
-                if a == b:
-                    continue
-                if any(w.isdigit() and int(w) < 100 for w in words):
-                    continue
-            tokens.append(token)
-        return tokens
-
-    return analyzer
 
 # Day 4 Random Forest numbers (structured features only), for direct comparison.
 DAY4_RF_METRICS = {
@@ -140,6 +109,10 @@ def main():
     log_reg = LogisticRegression(class_weight="balanced", max_iter=1000, random_state=RANDOM_STATE)
     log_reg.fit(X_train, y_train)
     print("Fit LogisticRegression on TF-IDF narrative features (class_weight='balanced')")
+
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    joblib.dump({"vectorizer": vectorizer, "model": log_reg}, MODEL_PATH)
+    print(f"Saved text-only model -> {MODEL_PATH}")
 
     y_pred = log_reg.predict(X_test)
     y_score = log_reg.predict_proba(X_test)[:, 1]

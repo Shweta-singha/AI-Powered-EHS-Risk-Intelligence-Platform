@@ -11,3 +11,6 @@ sentence-transformers>=3.0
 chromadb>=1.0
 pypdf>=6.0
 beautifulsoup4>=4.12
+joblib>=1.4
+langchain-core>=0.3
+langgraph>=0.2
