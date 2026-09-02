@@ -1,15 +1,15 @@
-pandas>=2.0
-numpy>=1.24
+pandas==3.0.5  # pinned exact: predict_risk builds model input DataFrames at runtime
+numpy==2.4.3  # pinned exact: underlies the joblib-pickled sklearn models' internals
 matplotlib>=3.7
 seaborn>=0.13
 plotly>=5.20
 streamlit>=1.30
 openpyxl>=3.1
 jupyter>=1.0
-scikit-learn>=1.4
+scikit-learn==1.9.0  # pinned exact: models/*.joblib were pickled by this version
 scipy>=1.11
 shap>=0.44
-sentence-transformers>=3.0
+sentence-transformers==6.0.1  # pinned exact: data/chroma_db/ embeddings were computed by this version
 chromadb==1.5.9  # pinned exact: data/chroma_db/ is a committed sqlite index built by this version
 pypdf>=6.0
 joblib>=1.4
