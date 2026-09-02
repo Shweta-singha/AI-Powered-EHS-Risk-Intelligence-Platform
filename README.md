@@ -11,7 +11,7 @@ data cleaning through the agent pipeline below).
 
 ## Architecture
 
-The platform layers four pieces, from the ground up:
+The platform layers six pieces, from the ground up:
 
 1. **Structured risk model (Day 4)** — `src/train_model.py` trains a Random
    Forest on structured features only (occupation, industry, fall
@@ -41,8 +41,37 @@ The platform layers four pieces, from the ground up:
    cites its guidance source(s) by filename, hedges explicitly when the risk
    estimate is low-confidence, and never claims to be more than a draft for
    human review.
+6. **Streamlit dashboard (Day 9)** — `dashboard/app.py` puts both of the
+   above in front of a user: an analytics tab (filterable incident table,
+   industry/time-trend/occupation×injury Plotly charts, all reused from the
+   Day 2 EDA notebook) and a chat tab that runs the same compiled LangGraph
+   agent from Day 7 against a typed-in incident description, with the risk
+   score, confidence flag, retrieved sources, and drafted recommendation all
+   rendered live.
 
-## Known Limitations
+## Engineering highlights
+
+A few things in here are worth a closer look than a feature-list bullet:
+
+- **Day 5's TF-IDF artifact hunt.** The text model's early top FATAL
+  coefficients were dominated by things like `2007`, `october`, and
+  `employee employee` — calendar tokens and ID-numbering duplication
+  artifacts from the narrative text, not real risk signal (full trail in
+  `docs/model_card.md`'s Feature Cleaning Iteration History). Root-caused via
+  direct coefficient inspection, not assumption, and the fix
+  (`src/text_analyzer.py`'s custom analyzer) is shared by both the text-only
+  and combined models rather than duplicated.
+- **Day 9's `stream()` over `invoke()` choice.** The chat tab runs
+  `GRAPH.stream(..., stream_mode="updates")` instead of the more obvious
+  `GRAPH.invoke(...)`. The difference matters concretely: if the last node
+  (`draft_recommendation`, a live Gemini call) fails — e.g. a missing
+  `GOOGLE_API_KEY` — `invoke()` would discard everything the graph had
+  already computed. `stream()` yields each node's output as it completes, so
+  the risk score and retrieved guidance from the two earlier nodes still
+  render even when the LLM call fails, with a clear inline error in place of
+  the missing draft instead of a blank screen or a stack trace.
+
+## Known limitations
 
 See `docs/model_card.md` for full detail (training data, evaluation metrics,
 feature-cleaning history). In brief:
@@ -53,6 +82,11 @@ feature-cleaning history). In brief:
 - No hyperparameter tuning was performed on any of the three models.
 - The RAG corpus is a small, curated set of 9 documents — not comprehensive
   OSHA coverage.
+- The drafted recommendations come from a general-purpose LLM (Gemini)
+  reading the retrieved guidance and model output — they are not verified
+  for correctness and can still misstate or omit safety-critical detail,
+  which is why every draft is explicitly framed as a starting point for a
+  human safety officer, never a final determination.
 - This is a portfolio/demo project, not validated for real safety decisions.
 
 ## Setup
@@ -104,6 +138,21 @@ first if the raw data or feature-engineering logic changes. Step 6 is
 independent of steps 1–5 (it only touches `data/compliance_docs/`), and step
 7 depends on the model artifacts from steps 3–4 and the index from step 6.
 
+## Running the dashboard
+
+Once steps 1–6 above have produced `models/` and `data/chroma_db/` (or you've
+pulled them from the repo as committed), launch the dashboard:
+
+```
+streamlit run dashboard/app.py
+```
+
+The analytics tab needs nothing beyond `data/processed/osha_clean.csv`
+(step 1). The chat tab needs the Day 4/5 models and the Chroma index (steps
+3, 4, 6) plus `GOOGLE_API_KEY` — without a key, risk prediction and guidance
+retrieval still work in the chat tab, and it shows a clear inline error in
+place of the drafted recommendation rather than crashing.
+
 ## Project layout
 
 ```
@@ -118,6 +167,7 @@ src/
   test_retrieval.py                 Day 6: retrieval + boilerplate re-ranking
   agent/tools.py                    Day 7: predict_risk, retrieve_guidance
   agent/graph.py                    Day 7: LangGraph pipeline + Gemini draft
+dashboard/app.py                    Day 9: Streamlit analytics + chat UI
 data/
   raw/                               pre-committed source Excel files
   processed/                         cleaned data + feature matrix
@@ -126,4 +176,5 @@ data/
 models/                              saved Day 4 / Day 5 model artifacts
 docs/model_card.md                   full model documentation and limitations
 notebooks/01_eda.ipynb               exploratory data analysis
+.env.example                        template for the GOOGLE_API_KEY secret
 ```

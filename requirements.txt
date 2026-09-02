@@ -10,7 +10,7 @@ scikit-learn>=1.4
 scipy>=1.11
 shap>=0.44
 sentence-transformers>=3.0
-chromadb>=1.0
+chromadb==1.5.9  # pinned exact: data/chroma_db/ is a committed sqlite index built by this version
 pypdf>=6.0
 joblib>=1.4
 langchain-core>=0.3
