@@ -3,6 +3,7 @@ numpy>=1.24
 matplotlib>=3.7
 seaborn>=0.13
 plotly>=5.20
+streamlit>=1.30
 openpyxl>=3.1
 jupyter>=1.0
 scikit-learn>=1.4
