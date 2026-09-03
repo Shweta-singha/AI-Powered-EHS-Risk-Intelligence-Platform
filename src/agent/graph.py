@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from pathlib import Path
 from typing import TypedDict
 
@@ -15,11 +16,11 @@ from tools import predict_risk, retrieve_guidance  # noqa: E402
 
 load_dotenv()
 
-# gemini-1.5-flash is retired. gemini-3.7-flash (the newest Flash-tier model)
-# returned persistent 503 "high demand" errors against this API key; the API
-# itself named gemini-3.6-flash as the replacement when an older model ID
-# (gemini-2.5-flash) was requested with this key, and it responds reliably.
-GEMINI_MODEL = "gemini-3.6-flash"
+# gemini-1.5-flash is retired. gemini-3.6-flash (the current newest Flash-tier
+# model) returned persistent 503 "high demand" errors on the live deployment,
+# likely from free-tier contention on a just-released model. gemini-2.5-flash
+# is an older, more established free-tier model with more headroom.
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # Pulled from docs/model_card.md's "Known limitations" section so the LLM
 # call below can't overclaim beyond what the underlying models actually
@@ -98,6 +99,15 @@ Hard requirements:
 - Plain language, addressed to a safety officer -- not technical jargon.
 - 3-5 sentences."""
 
+GEMINI_MAX_ATTEMPTS = 3
+GEMINI_BACKOFF_SECONDS = [2, 4]
+
+DRAFT_UNAVAILABLE_MESSAGE = (
+    "The recommendation drafting service is temporarily unavailable. The risk "
+    "assessment and retrieved guidance above are still valid -- please try again "
+    "in a moment."
+)
+
 _gemini_client = None
 
 
@@ -123,12 +133,18 @@ def draft_recommendation_node(state: IncidentState) -> dict:
         f"Retrieved OSHA guidance:\n{state['guidance_text']}"
     )
 
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=user_content,
-        config=genai_types.GenerateContentConfig(system_instruction=DRAFT_SYSTEM_PROMPT),
-    )
-    return {"draft": response.text}
+    for attempt in range(GEMINI_MAX_ATTEMPTS):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=user_content,
+                config=genai_types.GenerateContentConfig(system_instruction=DRAFT_SYSTEM_PROMPT),
+            )
+            return {"draft": response.text}
+        except Exception:
+            if attempt == GEMINI_MAX_ATTEMPTS - 1:
+                return {"draft": DRAFT_UNAVAILABLE_MESSAGE}
+            time.sleep(GEMINI_BACKOFF_SECONDS[attempt])
 
 
 def build_graph():
