@@ -1,4 +1,5 @@
 import re
+import shutil
 from pathlib import Path
 
 import chromadb
@@ -102,12 +103,20 @@ def main():
 
     model = SentenceTransformer(EMBEDDING_MODEL)
 
+    # Fresh index each run -- avoids duplicate/stale chunks piling up across
+    # reruns. client.delete_collection() alone is NOT enough: it only removes
+    # the collection's rows from chroma.sqlite3, not the HNSW segment's
+    # on-disk directory (a UUID-named folder of .bin files) -- that segment
+    # directory silently survives every rebuild and accumulates on disk
+    # (one such orphaned directory went unnoticed across several rebuilds in
+    # this repo before being found and manually removed). Deleting the whole
+    # persistent-client directory before recreating it is the only way to
+    # guarantee no orphaned segment survives a rebuild.
+    db_path = Path(DB_DIR)
+    if db_path.exists():
+        shutil.rmtree(db_path)
+
     client = chromadb.PersistentClient(path=DB_DIR)
-    # Fresh index each run -- avoids duplicate/stale chunks piling up across reruns.
-    try:
-        client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
     collection = client.create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
 
     all_chunks, all_ids, all_metadatas = [], [], []
