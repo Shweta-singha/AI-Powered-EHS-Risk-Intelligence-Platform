@@ -2,9 +2,15 @@ import sys
 
 import numpy as np
 from scipy.sparse import csr_matrix, hstack
+from sklearn.calibration import calibration_curve
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    precision_recall_fscore_support,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 
 sys.path.append("src")
@@ -61,6 +67,51 @@ def evaluate(name, y_test, y_pred, y_score):
         "fatal_recall": report["fatal (True)"]["recall"],
         "fatal_f1": report["fatal (True)"]["f1-score"],
     }
+
+
+def sweep_thresholds(y_test, y_score, thresholds=None):
+    """Re-derives y_pred at each candidate threshold from the already-computed
+    y_score -- no retraining. Fatal-class recall is the metric that matters
+    most here (a missed fatal prediction is the costly error), so precision/
+    recall/F1 are reported for the fatal class specifically, alongside
+    non-fatal precision/recall for context."""
+    if thresholds is None:
+        thresholds = [0.3, 0.4, 0.5, 0.6, 0.7]
+
+    print("\n--- Threshold sweep (fatal class = positive) ---")
+    header = (
+        f"{'Threshold':<12}{'Fatal P':>10}{'Fatal R':>10}{'Fatal F1':>10}"
+        f"{'Non-fatal P':>14}{'Non-fatal R':>14}"
+    )
+    print(header)
+    print("-" * len(header))
+    for threshold in thresholds:
+        y_pred = y_score >= threshold
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            y_test, y_pred, labels=[False, True], zero_division=0
+        )
+        print(
+            f"{threshold:<12.2f}{precision[1]:>10.4f}{recall[1]:>10.4f}{f1[1]:>10.4f}"
+            f"{precision[0]:>14.4f}{recall[0]:>14.4f}"
+        )
+
+
+def check_calibration(log_reg, X_test, y_test, n_bins=10):
+    """Reliability check: when the model predicts probability p, is the
+    incident actually fatal about p of the time? If this table shows
+    meaningful drift between predicted and observed, sklearn.calibration's
+    CalibratedClassifierCV(method='sigmoid') (Platt scaling) or
+    method='isotonic' (isotonic regression) are the documented next step --
+    not implemented here, since that needs a full retrain-and-compare."""
+    y_score = log_reg.predict_proba(X_test)[:, 1]
+    prob_true, prob_pred = calibration_curve(y_test, y_score, n_bins=n_bins, strategy="uniform")
+
+    print("\n--- Calibration check (predicted probability vs. observed fatal rate) ---")
+    header = f"{'Mean predicted prob':>22}{'Observed fatal rate':>22}"
+    print(header)
+    print("-" * len(header))
+    for pred, true in zip(prob_pred, prob_true):
+        print(f"{pred:>22.4f}{true:>22.4f}")
 
 
 def print_comparison(combined_metrics):
@@ -154,6 +205,9 @@ def main():
     y_pred = log_reg.predict(X_test)
     y_score = log_reg.predict_proba(X_test)[:, 1]
     combined_metrics = evaluate("Combined text + structured Logistic Regression", y_test, y_pred, y_score)
+
+    sweep_thresholds(y_test, y_score)
+    check_calibration(log_reg, X_test, y_test)
 
     print_comparison(combined_metrics)
 

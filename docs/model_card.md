@@ -212,13 +212,91 @@ Forest would still be the better pick. Choosing the combined model does not
 resolve or improve any of the limitations below — it is two imperfect signal
 sources combined, not a validated risk model.
 
+## Threshold Selection and Cost-Sensitive Framing
+
+The combined model outputs a probability (`predict_proba`), not just a label
+— the 0.5 threshold used elsewhere in this model card (and in `evaluate()`'s
+default `y_pred`) is a default, not a considered choice. In a safety
+context, the two error types are not equally costly:
+
+- **False negative** (predicted non-fatal, actually fatal): the model misses
+  the incident type most in need of attention. This is the costly error.
+- **False positive** (predicted fatal, actually non-fatal): an over-cautious
+  flag a safety officer reviews and dismisses — mildly wasteful, not
+  dangerous.
+
+That asymmetry favors optimizing for fatal-class recall over raw accuracy or
+even fatal precision. `src/train_combined_model.py`'s `sweep_thresholds()`
+re-scores the same test set's already-computed probabilities at five
+thresholds, without retraining:
+
+| Threshold | Fatal precision | Fatal recall | Fatal F1 | Non-fatal precision | Non-fatal recall |
+|---|---|---|---|---|---|
+| 0.30 | 0.8527 | 0.9322 | 0.8907 | 0.5966 | 0.3838 |
+| 0.40 | 0.8953 | 0.8333 | 0.8632 | 0.4957 | 0.6270 |
+| 0.50 (default) | 0.9286 | 0.7345 | 0.8202 | 0.4354 | 0.7838 |
+| 0.60 | 0.9601 | 0.6116 | 0.7472 | 0.3778 | 0.9027 |
+| 0.70 | 0.9769 | 0.5367 | 0.6928 | 0.3492 | 0.9514 |
+
+**Recommended threshold: 0.30.** Lowering the threshold from the default 0.5
+to 0.30 raises fatal recall from 73.5% to 93.2% — catching many more fatal
+incidents the default threshold would have missed — while fatal precision
+only drops from 92.9% to 85.3%. It's also the threshold with the best fatal
+F1 in this sweep (0.8907 vs. 0.8202 at 0.5), so this isn't a pure
+recall-for-precision trade: 0.30 is close to a strict improvement over the
+default on the class that matters most here. The cost lands on the
+non-fatal class — its recall drops from 78.4% to 38.4%, meaning a safety
+officer reviews more false alarms. Given the cost asymmetry above (a missed
+fatal is costly; an extra review is not), that trade is worth taking.
+
+This is a recommendation about which threshold to apply to this model's
+existing probabilities, not a claim that those probabilities are themselves
+well-calibrated — see below.
+
+### Probability calibration
+
+`check_calibration()` bins the test set's predicted probabilities and
+compares each bin's mean predicted probability to the actual observed fatal
+rate within that bin:
+
+| Mean predicted probability | Observed fatal rate |
+|---|---|
+| 0.0728 | 0.0000 |
+| 0.1562 | 0.2222 |
+| 0.2512 | 0.4884 |
+| 0.3510 | 0.6087 |
+| 0.4488 | 0.7071 |
+| 0.5461 | 0.7982 |
+| 0.6508 | 0.8548 |
+| 0.7451 | 0.8871 |
+| 0.8515 | 0.9600 |
+| 0.9946 | 1.0000 |
+
+The model is systematically **underconfident** across nearly the whole
+range: at a ~25% predicted probability, the actual observed fatal rate in
+that bin is 48.8%; at a ~55% prediction, observed is 79.8%. Only at the
+extremes (near 0 and near 1) do predicted and observed align closely. This
+is a plausible side effect of `class_weight="balanced"`, which reweights the
+loss as if the two classes were equally frequent — deflating predicted fatal
+probabilities relative to this dataset's actual ~79% fatal base rate, even
+as it improves classification metrics on the minority (non-fatal) class.
+`sklearn.calibration.CalibratedClassifierCV` supports post-hoc recalibration
+via `method='sigmoid'` (Platt scaling) or `method='isotonic'` (isotonic
+regression) — not implemented here, since it needs a full
+retrain-and-compare pass out of scope for this update. Combined with the
+scrape-selection caveat documented above, these probabilities should be read
+as a relative ranking signal, not as calibrated real-world fatality
+likelihoods, until that recalibration work is done.
+
 ## Known limitations
 
 - **Small dataset**: 4,463 rows after cleaning, with only 893 in the test
   set (185 non-fatal) — metrics, especially for the minority class, carry
   meaningful sampling uncertainty.
 - **Class imbalance**: ~79% fatal / 21% non-fatal in both splits. Mitigated
-  with `class_weight="balanced"` but not with resampling or threshold tuning.
+  with `class_weight="balanced"` and, as of the Threshold Selection and
+  Cost-Sensitive Framing section above, threshold tuning (0.30 selected over
+  the 0.5 default) — resampling has not been tried.
 - **Non-representative fatality rate**: as above, the 79% rate reflects
   scrape selection, not real-world incidence — this model's output
   probabilities should not be read as calibrated real-world fatality risk.
